@@ -467,25 +467,62 @@ ShellRoot {
                 }
             }
 
-            Text {
-                id: clock
-                color: fg
-                font.pixelSize: 32
-                font.bold: true
-                font.family: "Andy"
+            Rectangle {
+                width: 255
+                height: 46
+                radius: 16
+                color: bg
+                border.color: muted
+                border.width: 1
 
-                function updateTime() {
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
+                    spacing: 10
+
+                    Text {
+                        id: dateLabel
+                        Layout.preferredWidth: 92
+                        horizontalAlignment: Text.AlignHCenter
+                        color: muted
+                        font.pixelSize: 24
+                        font.bold: true
+                        font.family: "Andy"
+                    }
+
+                    Rectangle {
+                        width: 1
+                        height: 24
+                        radius: 1
+                        color: muted
+                        opacity: 0.55
+                    }
+
+                    Text {
+                        id: clock
+                        Layout.preferredWidth: 118
+                        horizontalAlignment: Text.AlignHCenter
+                        color: fg
+                        font.pixelSize: 24
+                        font.bold: true
+                        font.family: "Andy"
+                    }
+                }
+
+                function updateDateTime() {
                     const now = new Date();
+                    dateLabel.text = now.toLocaleDateString(Qt.locale(), "dd/MM");
                     clock.text = now.toLocaleTimeString(Qt.locale(), "hh:mm:ss");
                 }
 
-                Component.onCompleted: updateTime()
+                Component.onCompleted: updateDateTime()
 
                 Timer {
                     interval: 1000
                     running: true
                     repeat: true
-                    onTriggered: clock.updateTime()
+                    onTriggered: parent.updateDateTime()
                 }
             }
         }
@@ -500,7 +537,7 @@ ShellRoot {
 
         margins {
             top: 0
-            right: 230
+            right: 380
         }
 
         implicitWidth: 420 + 2 * cornerRadius
