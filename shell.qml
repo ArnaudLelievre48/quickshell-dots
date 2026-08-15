@@ -37,6 +37,7 @@ ShellRoot {
     property bool volumeMenuOpen: false
     property bool audioDetailsOpen: false
     property bool playerMenuOpen: false
+    property bool powerDockOpen: false
     property var audioInfo: ({
         sinkVolume: 0,
         sourceVolume: 0,
@@ -53,6 +54,16 @@ ShellRoot {
         album: "",
         player: "",
         artUrl: ""
+    })
+    property var batteryInfo: ({
+        available: false,
+        percentage: 0,
+        status: "Unknown",
+        charging: false,
+        plugged: false,
+        time: "",
+        detail: "",
+        icon: "󰂑"
     })
 
     function refreshDesktop() {
@@ -76,6 +87,12 @@ ShellRoot {
         menuCommandProcess.running = true;
     }
 
+    function runPowerCommand(command) {
+        powerDockOpen = false;
+        menuCommandProcess.command = ["bash", "-lc", command];
+        menuCommandProcess.running = true;
+    }
+
     function refreshAudio() {
         audioRefreshProcess.running = true;
     }
@@ -92,6 +109,10 @@ ShellRoot {
     function runPlayerCommand(command) {
         playerCommandProcess.command = ["bash", "-lc", command];
         playerCommandProcess.running = true;
+    }
+
+    function refreshBattery() {
+        batteryRefreshProcess.running = true;
     }
 
     Process {
@@ -178,6 +199,24 @@ ShellRoot {
         onExited: refreshPlayer()
     }
 
+    Process {
+        id: batteryRefreshProcess
+        command: ["python3", "/home/arnaud/.config/quickshell/scripts/battery-state.py"]
+        running: true
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const parsed = JSON.parse(text.trim());
+                    batteryInfo = parsed;
+                } catch (e) {
+                    console.warn("Could not parse battery state:", e);
+                }
+            }
+        }
+        stderr: StdioCollector {}
+    }
+
     FileView {
         id: pywalFile
         path: Qt.resolvedUrl("/home/arnaud/.cache/wal/colors.json")
@@ -221,6 +260,13 @@ ShellRoot {
     }
 
     Timer {
+        interval: 30000
+        running: true
+        repeat: true
+        onTriggered: refreshBattery()
+    }
+
+    Timer {
         id: menuCloseTimer
         interval: 260
         repeat: false
@@ -249,6 +295,13 @@ ShellRoot {
         interval: 280
         repeat: false
         onTriggered: dockOpen = false
+    }
+
+    Timer {
+        id: powerDockCloseTimer
+        interval: 280
+        repeat: false
+        onTriggered: powerDockOpen = false
     }
 
     // Barre principale en haut.
@@ -300,7 +353,7 @@ ShellRoot {
                 text: "arnaud-laptop"
                 color: muted
                 font.pixelSize: 32
-                font.family: "Andy"
+                font.family: "Annotation Mono"
             }
 
             RowLayout {
@@ -326,7 +379,7 @@ ShellRoot {
                             color: selected ? bg : fg
                             font.pixelSize: 28
                             font.bold: true
-                            font.family: "Andy"
+                            font.family: "Annotation Mono"
                         }
 
                         MouseArea {
@@ -339,6 +392,68 @@ ShellRoot {
             }
 
             Item { Layout.fillWidth: true }
+
+            Rectangle {
+                width: 200
+                height: 46
+                radius: 16
+                color: bg
+                border.color: batteryInfo.charging || batteryInfo.plugged ? active : muted
+                border.width: 1
+                opacity: batteryInfo.available ? 1 : 0.65
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 8
+
+                    Text {
+                        text: batteryInfo.icon
+                        color: batteryInfo.charging || batteryInfo.plugged ? active : fg
+                        font.pixelSize: 24
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: batteryInfo.available ? batteryInfo.percentage + "%" : "--%"
+                        color: fg
+                        font.pixelSize: 24
+                        font.bold: true
+                        font.family: "Annotation Mono"
+                    }
+
+                    Rectangle {
+                        width: 1
+                        height: 24
+                        radius: 1
+                        color: muted
+                        opacity: 0.5
+                        visible: batteryInfo.time.length > 0
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: batteryInfo.time
+                        color: muted
+                        font.pixelSize: 24
+                        font.bold: true
+                        font.family: "Annotation Mono"
+                        elide: Text.ElideRight
+                        visible: batteryInfo.time.length > 0
+                    }
+                }
+
+                HoverHandler { id: batteryHover }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    onEntered: refreshBattery()
+                }
+            }
+
 
             Rectangle {
                 width: 360
@@ -388,7 +503,7 @@ ShellRoot {
                             color: fg
                             font.pixelSize: 16
                             font.bold: true
-                            font.family: "Andy"
+                            font.family: "Annotation Mono"
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }
@@ -443,7 +558,7 @@ ShellRoot {
                         color: volumeMenuOpen ? bg : fg
                         font.pixelSize: 24
                         font.bold: true
-                        font.family: "Andy"
+                        font.family: "Annotation Mono"
                     }
                 }
 
@@ -488,7 +603,7 @@ ShellRoot {
                         color: muted
                         font.pixelSize: 24
                         font.bold: true
-                        font.family: "Andy"
+                        font.family: "Annotation Mono"
                     }
 
                     Rectangle {
@@ -506,7 +621,7 @@ ShellRoot {
                         color: fg
                         font.pixelSize: 24
                         font.bold: true
-                        font.family: "Andy"
+                        font.family: "Annotation Mono"
                     }
                 }
 
@@ -664,7 +779,7 @@ ShellRoot {
                             color: fg
                             font.pixelSize: 20
                             font.bold: true
-                            font.family: "Andy"
+                            font.family: "Annotation Mono"
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }
@@ -914,7 +1029,7 @@ ShellRoot {
                         color: muted
                         font.pixelSize: 26
                         font.bold: true
-                        font.family: "Andy"
+                        font.family: "Annotation Mono"
                     }
 
                     Repeater {
@@ -941,8 +1056,8 @@ ShellRoot {
                             },
                             {
                                 label: "Change Wallpaper",
-                                hint: "Super + Shift + W",
-                                command: "$HOME/.config/wal-scripts/wal-script; bspc wm -r"
+                                hint: "Super + Alt + R",
+                                command: "bspc wm -r"
                             }
 
                         ]
@@ -968,7 +1083,7 @@ ShellRoot {
                                     color: fg
                                     font.pixelSize: 22
                                     font.bold: true
-                                    font.family: "Andy"
+                                    font.family: "Annotation Mono"
                                 }
 
                                 Item { Layout.fillWidth: true }
@@ -1029,9 +1144,9 @@ ShellRoot {
             Item {
                 id: volumeCard
                 width: 420 + cornerRadius
-                height: (audioDetailsOpen ? 500 : 218) + cornerRadius
+                height: (audioDetailsOpen ? 500 : 250) + cornerRadius
                 readonly property int contentWidth: 420
-                readonly property int contentHeight: audioDetailsOpen ? 500 : 218
+                readonly property int contentHeight: audioDetailsOpen ? 500 : 250
                 readonly property int bodyX: cornerRadius
                 readonly property int volumeRadius: 24
                 readonly property int concaveRadius: cornerRadius
@@ -1119,7 +1234,7 @@ ShellRoot {
                                 color: muted
                                 font.pixelSize: 24
                                 font.bold: true
-                                font.family: "Andy"
+                                font.family: "Annotation Mono"
                             }
 
                             Text {
@@ -1127,7 +1242,7 @@ ShellRoot {
                                 color: fg
                                 font.pixelSize: 32
                                 font.bold: true
-                                font.family: "Andy"
+                                font.family: "Annotation Mono"
                             }
                         }
 
@@ -1241,7 +1356,7 @@ ShellRoot {
                                 color: fg
                                 font.pixelSize: 24
                                 font.bold: true
-                                font.family: "Andy"
+                                font.family: "Annotation Mono"
                             }
 
                             Item { Layout.fillWidth: true }
@@ -1250,7 +1365,7 @@ ShellRoot {
                                 text: audioDetailsOpen ? "󰅀" : "󰅂"
                                 color: muted
                                 font.pixelSize: 26
-                                font.family: "Andy"
+                                font.family: "Annotation Mono"
                             }
                         }
 
@@ -1273,7 +1388,7 @@ ShellRoot {
                             color: active
                             font.pixelSize: 24
                             font.bold: true
-                            font.family: "Andy"
+                            font.family: "Annotation Mono"
                         }
 
                         Repeater {
@@ -1293,8 +1408,8 @@ ShellRoot {
                                     spacing: 8
 
                                     Text { text: modelData.default ? "●" : "○"; color: modelData.default ? active : muted; font.pixelSize: 13 }
-                                    Text { Layout.fillWidth: true; text: modelData.description; color: fg; font.pixelSize: 18; elide: Text.ElideRight; font.family: "Andy"}
-                                    Text { text: modelData.volume + "%"; color: muted; font.pixelSize: 18; font.family: "Andy"}
+                                    Text { Layout.fillWidth: true; text: modelData.description; color: fg; font.pixelSize: 18; elide: Text.ElideRight; font.family: "Annotation Mono"}
+                                    Text { text: modelData.volume + "%"; color: muted; font.pixelSize: 18; font.family: "Annotation Mono"}
                                 }
 
                                 MouseArea {
@@ -1312,7 +1427,7 @@ ShellRoot {
                             color: active
                             font.pixelSize: 24
                             font.bold: true
-                            font.family: "Andy"
+                            font.family: "Annotation Mono"
                         }
 
                         Repeater {
@@ -1332,8 +1447,8 @@ ShellRoot {
                                     spacing: 8
 
                                     Text { text: modelData.default ? "●" : "○"; color: modelData.default ? active : muted; font.pixelSize: 13 }
-                                    Text { Layout.fillWidth: true; text: modelData.description; color: fg; font.pixelSize: 18; elide: Text.ElideRight; font.family: "Andy"}
-                                    Text { text: modelData.volume + "%"; color: muted; font.pixelSize: 18; font.family: "Andy"}
+                                    Text { Layout.fillWidth: true; text: modelData.description; color: fg; font.pixelSize: 18; elide: Text.ElideRight; font.family: "Annotation Mono"}
+                                    Text { text: modelData.volume + "%"; color: muted; font.pixelSize: 18; font.family: "Annotation Mono"}
                                 }
 
                                 MouseArea {
@@ -1385,6 +1500,183 @@ ShellRoot {
 
         implicitWidth: frameSize
         color: bg
+
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: frameSize
+            height: 190
+            color: "transparent"
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                onEntered: {
+                    powerDockCloseTimer.stop();
+                    powerDockOpen = true;
+                }
+            }
+        }
+    }
+
+    // Power dock latéral : sort du milieu du bord droit.
+    PanelWindow {
+        anchors {
+            top: true
+            bottom: true
+            right: true
+        }
+
+        implicitWidth: 172
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        mask: Region { item: powerDockCard }
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Item {
+                id: powerDockCard
+                width: 172 - frameSize
+                height: 480 + 2 * cornerRadius
+                readonly property int bodyWidth: 172 - frameSize
+                readonly property int bodyHeight: 480
+                readonly property int bodyY: cornerRadius
+                readonly property int powerRadius: 34
+                readonly property int concaveRadius: cornerRadius
+                anchors.verticalCenter: parent.verticalCenter
+                x: powerDockOpen ? 0 : parent.width
+
+                Canvas {
+                    anchors.fill: parent
+
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        const r = powerDockCard.powerRadius;
+                        const cr = powerDockCard.concaveRadius;
+                        const w = powerDockCard.bodyWidth;
+                        const y0 = powerDockCard.bodyY;
+                        const h = powerDockCard.bodyHeight;
+
+                        ctx.reset();
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.fillStyle = bg;
+
+                        // Corps : côté gauche arrondi, côté droit droit pour se coller
+                        // au raccord vers la bordure droite.
+                        ctx.beginPath();
+                        ctx.moveTo(w, y0);
+                        ctx.lineTo(w, y0 + h);
+                        ctx.lineTo(r, y0 + h);
+                        ctx.quadraticCurveTo(0, y0 + h, 0, y0 + h - r);
+                        ctx.lineTo(0, y0 + r);
+                        ctx.quadraticCurveTo(0, y0, r, y0);
+                        ctx.lineTo(w, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        // Raccords additifs à droite, inspirés du dock du bas :
+                        // ça prolonge le bg pour une transition smooth avec la bordure.
+                        ctx.beginPath();
+                        ctx.moveTo(w, y0);
+                        ctx.lineTo(w - cr, y0);
+                        ctx.quadraticCurveTo(w, y0, w, y0 - 1.5 * cr);
+                        ctx.lineTo(w, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        ctx.beginPath();
+                        ctx.moveTo(w, y0 + h);
+                        ctx.lineTo(w - cr, y0 + h);
+                        ctx.quadraticCurveTo(w, y0 + h, w, y0 + h + 1.5 * cr);
+                        ctx.lineTo(w, y0 + h);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: powerDockOpen ? Easing.OutCubic : Easing.InCubic
+                    }
+                }
+
+                ColumnLayout {
+                    width: powerDockCard.bodyWidth - 24
+                    height: powerDockCard.bodyHeight - 24
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.leftMargin: 12
+                    anchors.topMargin: powerDockCard.bodyY + 12
+                    spacing: 8
+
+                    Repeater {
+                        model: [
+                            { icon: "⏻", label: "off", command: "/home/arnaud/.config/quickshell/scripts/power-action.sh poweroff" },
+                            { icon: "⟲", label: "reboot", command: "/home/arnaud/.config/quickshell/scripts/power-action.sh reboot" },
+                            { icon: "⏾", label: "lock", command: "/home/arnaud/.config/quickshell/scripts/power-action.sh lock" },
+                            { icon: "□", label: "sleep", command: "/home/arnaud/.config/quickshell/scripts/power-action.sh suspend" }
+                        ]
+
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            height: 86
+                            radius: 18
+                            color: powerItemHover.hovered ? hover : bg
+                            border.color: powerItemHover.hovered ? active : muted
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: 0
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: modelData.icon
+                                    color: fg
+                                    font.pixelSize: 34
+                                    font.bold: true
+                                }
+
+                                Text {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: modelData.label
+                                    color: muted
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    font.family: "Andy"
+                                }
+                            }
+
+                            HoverHandler { id: powerItemHover }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: runPowerCommand(modelData.command)
+                            }
+                        }
+                    }
+                }
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            powerDockCloseTimer.stop();
+                            powerDockOpen = true;
+                        } else {
+                            powerDockCloseTimer.restart();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Bord bas du cadre.
