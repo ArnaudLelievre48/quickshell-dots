@@ -38,6 +38,9 @@ ShellRoot {
     property bool audioDetailsOpen: false
     property bool playerMenuOpen: false
     property bool powerDockOpen: false
+    property bool sideDockOpen: false
+    property string sideMenuType: ""
+    property string wifiSearch: ""
     property var audioInfo: ({
         sinkVolume: 0,
         sourceVolume: 0,
@@ -64,6 +67,15 @@ ShellRoot {
         time: "",
         detail: "",
         icon: "󰂑"
+    })
+    property var sideInfo: ({
+        wifi: { on: false, current: { ssid: "offline", signal: 0, connected: false }, networks: [] },
+        bluetooth: { powered: false, connected: [], devices: [] },
+        ram: { percent: 0, text: "" },
+        disk: { percent: 0, free: "" },
+        cpu: { percent: 0 },
+        gpu: { available: false, percent: 0, temp: 0, memory: "" },
+        temperature: { celsius: 0 }
     })
 
     function refreshDesktop() {
@@ -113,6 +125,39 @@ ShellRoot {
 
     function refreshBattery() {
         batteryRefreshProcess.running = true;
+    }
+
+    function refreshSideInfo() {
+        sideRefreshProcess.running = true;
+    }
+
+    function runSideCommand(command) {
+        sideCommandProcess.command = ["bash", "-lc", command];
+        sideCommandProcess.running = true;
+    }
+
+    function sideMetricValue(kind) {
+        if (kind === "wifi") return sideInfo.wifi.current.connected ? sideInfo.wifi.current.signal + "%" : (sideInfo.wifi.on ? "on" : "off");
+        if (kind === "bluetooth") return sideInfo.bluetooth.connected.length > 0 ? sideInfo.bluetooth.connected.length + "" : (sideInfo.bluetooth.powered ? "on" : "off");
+        if (kind === "ram") return sideInfo.ram.percent + "%";
+        if (kind === "disk") return sideInfo.disk.free;
+        if (kind === "cpu") return sideInfo.cpu.percent + "%";
+        if (kind === "gpu") return sideInfo.gpu.available ? sideInfo.gpu.percent + "%" : "--";
+        if (kind === "temp") return sideInfo.temperature.celsius + "°";
+        return "";
+    }
+
+    function shellQuote(value) {
+        return "'" + String(value).replace(/'/g, "'\\''") + "'";
+    }
+
+    function filteredWifiNetworks() {
+        const query = wifiSearch.toLowerCase().trim();
+        const networks = sideInfo.wifi.networks || [];
+        const filtered = query.length === 0
+            ? networks
+            : networks.filter(function(n) { return n.ssid.toLowerCase().indexOf(query) !== -1; });
+        return filtered.slice(0, 8);
     }
 
     Process {
@@ -217,6 +262,32 @@ ShellRoot {
         stderr: StdioCollector {}
     }
 
+    Process {
+        id: sideRefreshProcess
+        command: ["python3", "/home/arnaud/.config/quickshell/scripts/side-state.py"]
+        running: true
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const parsed = JSON.parse(text.trim());
+                    sideInfo = parsed;
+                } catch (e) {
+                    console.warn("Could not parse side dock state:", e);
+                }
+            }
+        }
+        stderr: StdioCollector {}
+    }
+
+    Process {
+        id: sideCommandProcess
+        running: false
+        stdout: StdioCollector {}
+        stderr: StdioCollector {}
+        onExited: refreshSideInfo()
+    }
+
     FileView {
         id: pywalFile
         path: Qt.resolvedUrl("/home/arnaud/.cache/wal/colors.json")
@@ -267,6 +338,13 @@ ShellRoot {
     }
 
     Timer {
+        interval: 3000
+        running: true
+        repeat: true
+        onTriggered: refreshSideInfo()
+    }
+
+    Timer {
         id: menuCloseTimer
         interval: 260
         repeat: false
@@ -302,6 +380,17 @@ ShellRoot {
         interval: 280
         repeat: false
         onTriggered: powerDockOpen = false
+    }
+
+    Timer {
+        id: sideDockCloseTimer
+        interval: 280
+        repeat: false
+        onTriggered: {
+            sideDockOpen = false;
+            sideMenuType = "";
+            wifiSearch = "";
+        }
     }
 
     // Barre principale en haut.
@@ -677,7 +766,7 @@ ShellRoot {
                 opacity: playerMenuOpen ? 1 : 0
 
                 Behavior on y {
-                    NumberAnimation { duration: 300; easing.type: playerMenuOpen ? Easing.OutCubic : Easing.InCubic }
+                    NumberAnimation { duration: 400; easing.type: playerMenuOpen ? Easing.OutCubic : Easing.InCubic }
                 }
 
                 Behavior on opacity {
@@ -941,7 +1030,7 @@ ShellRoot {
                         to: "open"
                         NumberAnimation {
                             properties: "y"
-                            duration: 300
+                            duration: 400
                             easing.type: Easing.OutCubic
                         }
                         NumberAnimation {
@@ -1206,11 +1295,11 @@ ShellRoot {
                 }
 
                 Behavior on y {
-                    NumberAnimation { duration: 300; easing.type: volumeMenuOpen ? Easing.OutCubic : Easing.InCubic }
+                    NumberAnimation { duration: 400; easing.type: volumeMenuOpen ? Easing.OutCubic : Easing.InCubic }
                 }
 
                 Behavior on height {
-                    NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                    NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                 }
 
                 ColumnLayout {
@@ -1488,6 +1577,463 @@ ShellRoot {
 
         implicitWidth: frameSize
         color: bg
+
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: frameSize
+            height: 360
+            color: "transparent"
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                onEntered: {
+                    sideDockCloseTimer.stop();
+                    sideDockOpen = true;
+                    refreshSideInfo();
+                }
+            }
+        }
+    }
+
+    // Side dock infos système : sort du milieu du bord gauche.
+    PanelWindow {
+        anchors {
+            top: true
+            bottom: true
+            left: true
+        }
+
+        implicitWidth: 154
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        mask: Region { item: sideDockCard }
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Item {
+                id: sideDockCard
+                width: 120 + cornerRadius
+                height: 520 + 2 * cornerRadius
+                readonly property int bodyWidth: 120
+                readonly property int bodyHeight: 520
+                readonly property int bodyY: cornerRadius
+                readonly property int sideRadius: 34
+                readonly property int concaveRadius: cornerRadius
+                anchors.verticalCenter: parent.verticalCenter
+                x: sideDockOpen ? frameSize : -width - 8
+
+                Canvas {
+                    anchors.fill: parent
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        const r = sideDockCard.sideRadius;
+                        const cr = sideDockCard.concaveRadius;
+                        const w = sideDockCard.bodyWidth;
+                        const y0 = sideDockCard.bodyY;
+                        const h = sideDockCard.bodyHeight;
+
+                        ctx.reset();
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.fillStyle = bg;
+
+                        // Côté gauche droit/collé à la bordure, côté droit arrondi.
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0);
+                        ctx.lineTo(w - r, y0);
+                        ctx.quadraticCurveTo(w, y0, w, y0 + r);
+                        ctx.lineTo(w, y0 + h - r);
+                        ctx.quadraticCurveTo(w, y0 + h, w - r, y0 + h);
+                        ctx.lineTo(0, y0 + h);
+                        ctx.lineTo(0, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        // Raccords additifs à gauche vers la bordure.
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0);
+                        ctx.lineTo(cr, y0);
+                        ctx.quadraticCurveTo(0, y0, 0, y0 - 1.5 * cr);
+                        ctx.lineTo(0, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0 + h);
+                        ctx.lineTo(cr, y0 + h);
+                        ctx.quadraticCurveTo(0, y0 + h, 0, y0 + h + 1.5 * cr);
+                        ctx.lineTo(0, y0 + h);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+
+                Behavior on x {
+                    NumberAnimation { duration: 400; easing.type: sideDockOpen ? Easing.OutCubic : Easing.InCubic }
+                }
+
+                ColumnLayout {
+                    width: sideDockCard.bodyWidth - 18
+                    height: sideDockCard.bodyHeight - 24
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.leftMargin: 9
+                    anchors.topMargin: sideDockCard.bodyY + 12
+                    spacing: 7
+
+                    Repeater {
+                        model: [
+                            { kind: "wifi", icon: "󰖩", label: "wifi" },
+                            { kind: "bluetooth", icon: "󰂯", label: "bt" },
+                            { kind: "ram", icon: "", label: "ram" },
+                            { kind: "disk", icon: "󰋊", label: "disk" },
+                            { kind: "cpu", icon: "", label: "cpu" },
+                            { kind: "gpu", icon: "󰢮", label: "gpu" },
+                            { kind: "temp", icon: "", label: "temp" }
+                        ]
+
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            height: 64
+                            radius: 16
+                            color: sideItemHover.hovered || sideMenuType === modelData.kind ? hover : bg
+                            border.color: sideItemHover.hovered || sideMenuType === modelData.kind ? active : muted
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 6
+
+                                Text {
+                                    text: modelData.icon
+                                    color: fg
+                                    font.pixelSize: 22
+                                    font.bold: true
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: -2
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.label
+                                        color: muted
+                                        font.pixelSize: 10
+                                        font.family: "Annotation Mono"
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: sideMetricValue(modelData.kind)
+                                        color: fg
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        font.family: "Annotation Mono"
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+
+                            HoverHandler {
+                                id: sideItemHover
+                                onHoveredChanged: {
+                                    if (hovered) {
+                                        sideDockCloseTimer.stop();
+                                        sideDockOpen = true;
+                                        refreshSideInfo();
+                                        if (modelData.kind === "wifi" || modelData.kind === "bluetooth")
+                                            sideMenuType = modelData.kind;
+                                    } else if (modelData.kind !== sideMenuType) {
+                                        sideDockCloseTimer.restart();
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (modelData.kind === "bluetooth")
+                                        runSideCommand("bluetoothctl power " + (sideInfo.bluetooth.powered ? "off" : "on"));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            sideDockCloseTimer.stop();
+                            sideDockOpen = true;
+                        } else {
+                            sideDockCloseTimer.restart();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Menus hover du side dock : wifi / bluetooth.
+    PanelWindow {
+        anchors {
+            top: true
+            bottom: true
+            left: true
+        }
+
+        implicitWidth: sideDockCard.bodyWidth + frameSize + 330 + cornerRadius
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        mask: Region { item: sideMenuCard }
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Item {
+                id: sideMenuCard
+                width: 330 + cornerRadius
+                height: (sideMenuType === "wifi" ? 415 : 325) + 2 * cornerRadius
+                readonly property int bodyWidth: 330
+                readonly property int bodyHeight: sideMenuType === "wifi" ? 415 : 325
+                readonly property int bodyY: cornerRadius
+                readonly property int menuRadius: 24
+                readonly property int concaveRadius: cornerRadius
+                anchors.verticalCenter: parent.verticalCenter
+                x: sideMenuType.length > 0 ? sideDockCard.bodyWidth + frameSize : -width
+
+                Behavior on x {
+                    NumberAnimation { duration: 400; easing.type: sideMenuType.length > 0 ? Easing.OutCubic : Easing.InCubic }
+                }
+
+                Canvas {
+                    anchors.fill: parent
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        const r = sideMenuCard.menuRadius;
+                        const cr = sideMenuCard.concaveRadius;
+                        const w = sideMenuCard.bodyWidth;
+                        const y0 = sideMenuCard.bodyY;
+                        const h = sideMenuCard.bodyHeight;
+
+                        ctx.reset();
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.fillStyle = bg;
+
+                        // Même logique que le dock gauche : gauche connecté,
+                        // droite arrondie, raccords concaves/additifs côté gauche.
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0);
+                        ctx.lineTo(w - r, y0);
+                        ctx.quadraticCurveTo(w, y0, w, y0 + r);
+                        ctx.lineTo(w, y0 + h - r);
+                        ctx.quadraticCurveTo(w, y0 + h, w - r, y0 + h);
+                        ctx.lineTo(0, y0 + h);
+                        ctx.lineTo(0, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0);
+                        ctx.lineTo(cr, y0);
+                        ctx.quadraticCurveTo(0, y0, 0, y0 - 1.5 * cr);
+                        ctx.lineTo(0, y0);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        ctx.beginPath();
+                        ctx.moveTo(0, y0 + h);
+                        ctx.lineTo(cr, y0 + h);
+                        ctx.quadraticCurveTo(0, y0 + h, 0, y0 + h + 1.5 * cr);
+                        ctx.lineTo(0, y0 + h);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+
+                ColumnLayout {
+                    width: sideMenuCard.bodyWidth - 36
+                    height: sideMenuCard.bodyHeight - 36
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.leftMargin: 18
+                    anchors.topMargin: sideMenuCard.bodyY + 18
+                    spacing: 7
+
+                    Text {
+                        text: sideMenuType === "wifi" ? "wifi networks" : "bluetooth devices"
+                        color: fg
+                        font.pixelSize: 20
+                        font.bold: true
+                        font.family: "Annotation Mono"
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: sideMenuType === "wifi"
+                              ? (sideInfo.wifi.current.connected ? "connected: " + sideInfo.wifi.current.ssid + " · " + sideInfo.wifi.current.signal + "%" : "not connected")
+                              : (sideInfo.bluetooth.powered ? "powered on" : "powered off")
+                        color: muted
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                        font.family: "Annotation Mono"
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 38
+                        radius: 13
+                        color: "transparent"
+                        border.color: muted
+                        border.width: 1
+                        visible: sideMenuType === "wifi"
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "search wifi"
+                            color: muted
+                            opacity: wifiSearch.length === 0 && !wifiSearchInput.activeFocus ? 0.75 : 0
+                            font.pixelSize: 13
+                            font.family: "Annotation Mono"
+                        }
+
+                        TextInput {
+                            id: wifiSearchInput
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            verticalAlignment: TextInput.AlignVCenter
+                            text: wifiSearch
+                            color: fg
+                            selectionColor: active
+                            selectedTextColor: bg
+                            font.pixelSize: 13
+                            font.family: "Annotation Mono"
+                            clip: true
+                            onTextChanged: wifiSearch = text
+                            onActiveFocusChanged: {
+                                if (activeFocus)
+                                    refreshSideInfo();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 38
+                        radius: 13
+                        color: sideToggleMouse.containsMouse ? hover : "transparent"
+                        border.color: muted
+                        border.width: 1
+                        visible: sideMenuType === "bluetooth"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: sideInfo.bluetooth.powered ? "turn bluetooth off" : "turn bluetooth on"
+                            color: fg
+                            font.pixelSize: 13
+                            font.bold: true
+                            font.family: "Annotation Mono"
+                        }
+
+                        MouseArea {
+                            id: sideToggleMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: runSideCommand("bluetoothctl power " + (sideInfo.bluetooth.powered ? "off" : "on"))
+                        }
+                    }
+
+                    Repeater {
+                        model: sideMenuType === "wifi" ? filteredWifiNetworks() : sideInfo.bluetooth.devices
+
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            height: 34
+                            radius: 11
+                            color: sideMenuItemMouse.containsMouse || modelData.active || modelData.connected ? hover : "transparent"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                Text {
+                                    text: modelData.active || modelData.connected ? "●" : "○"
+                                    color: modelData.active || modelData.connected ? active : muted
+                                    font.pixelSize: 12
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: sideMenuType === "wifi" ? modelData.ssid : modelData.name
+                                    color: fg
+                                    font.pixelSize: 12
+                                    font.family: "Annotation Mono"
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    text: sideMenuType === "wifi"
+                                          ? ((modelData.locked ? " " : "") + modelData.signal + "%")
+                                          : ""
+                                    color: muted
+                                    font.pixelSize: 11
+                                    font.family: "Annotation Mono"
+                                }
+                            }
+
+                            MouseArea {
+                                id: sideMenuItemMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (sideMenuType === "wifi") {
+                                        if (!modelData.active)
+                                            runSideCommand("/home/arnaud/.config/quickshell/scripts/wifi-connect.sh " + shellQuote(modelData.ssid));
+                                    } else {
+                                        runSideCommand("bluetoothctl connect " + modelData.mac);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            sideDockCloseTimer.stop();
+                            sideDockOpen = true;
+                        } else {
+                            sideDockCloseTimer.restart();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Bord droit du cadre.
@@ -1601,7 +2147,7 @@ ShellRoot {
 
                 Behavior on x {
                     NumberAnimation {
-                        duration: 300
+                        duration: 400
                         easing.type: powerDockOpen ? Easing.OutCubic : Easing.InCubic
                     }
                 }
@@ -1788,7 +2334,7 @@ ShellRoot {
 
                 Behavior on y {
                     NumberAnimation {
-                        duration: 300
+                        duration: 400
                         easing.type: dockOpen ? Easing.OutCubic : Easing.InCubic
                     }
                 }
